@@ -555,6 +555,7 @@ fn platform_target() -> Result<&'static str> {
         ("linux", "aarch64") if cfg!(target_env = "gnu") => Ok("aarch64-unknown-linux-gnu"),
         ("linux", "aarch64") => Ok("aarch64-unknown-linux-musl"),
         ("linux", "x86_64") if cfg!(target_env = "gnu") => Ok("x86_64-unknown-linux-gnu"),
+        ("linux", "riscv64") => Ok("riscv64gc-unknown-linux-gnu"),
         ("linux", "x86_64") => Ok("x86_64-unknown-linux-musl"),
         ("windows", "aarch64") => Ok("aarch64-pc-windows-msvc"),
         ("windows", "x86_64") => Ok("x86_64-pc-windows-msvc"),

@@ -1,0 +1,91 @@
+name: riscv64 release
+
+# Daily: when openai/codex publishes a new stable release, build it for riscv64
+# with this repo's patches and publish it as a release here.
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Upstream version to build (e.g. 0.169.0). Empty = latest stable."
+        required: false
+      force:
+        description: "Rebuild even if the release already exists"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: riscv64-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - name: Resolve upstream version
+        id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_VERSION: ${{ inputs.version }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            version=${INPUT_VERSION#v}; version=${version#rust-v}
+          else
+            tag=$(gh release view -R openai/codex --json tagName -q .tagName)
+            version=${tag#rust-v}
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$FORCE" != true ] && gh release view "v$version" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "v$version already released"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Free disk space
+        if: steps.v.outputs.skip != 'true'
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - name: Checkout riscv64 tooling
+        if: steps.v.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          path: self
+          sparse-checkout: riscv64
+
+      - name: Checkout upstream ${{ steps.v.outputs.version }}
+        if: steps.v.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: openai/codex
+          ref: rust-v${{ steps.v.outputs.version }}
+          path: upstream
+
+      - name: Install zig and cargo-zigbuild
+        if: steps.v.outputs.skip != 'true'
+        run: |
+          pip install --user ziglang cargo-zigbuild
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build package
+        if: steps.v.outputs.skip != 'true'
+        run: self/riscv64/package.sh upstream "${{ steps.v.outputs.version }}" dist
+
+      - name: Publish release
+        if: steps.v.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          notes="Codex CLI $VERSION (upstream rust-v$VERSION) built for riscv64gc-unknown-linux-gnu, glibc >= 2.36.
+
+          Install or update on the device:
+          \`\`\`sh
+          curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/riscv64/install.sh | sudo sh
+          \`\`\`"
+          gh release delete "v$VERSION" -R "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "v$VERSION" -R "$GITHUB_REPOSITORY" --title "Codex $VERSION for riscv64" --notes "$notes" dist/*
