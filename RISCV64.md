@@ -14,6 +14,8 @@ Tested on a StarFive VisionFive 2 (JH7110, 4x SiFive U74), Debian, glibc 2.36:
 - The binary starts in about 40 ms.
 - `codex sandbox` works: read-only filesystem and seccomp network block.
 - The background app-server daemon works.
+- Code mode works through OpenAI's own aarch64 `codex-code-mode-host` (V8), run
+  under qemu-user. The installer handles the setup.
 
 ## Install and update
 
@@ -33,6 +35,19 @@ The installer places the official package layout in `/opt/codex`:
 
 The app-server daemon requires that layout.
 
+The installer also sets up code mode. It downloads the version-matched official
+aarch64 code-mode host from npm and verifies its integrity hash. If qemu isn't
+already registered, it installs a static qemu-aarch64 10.x from Debian trixie
+and registers it with binfmt_misc. The host is installed behind a wrapper that
+pins `QEMU_CPU=neoverse-n1`, because qemu's default `max` CPU emulates
+pointer authentication and is very slow. Code mode is still an
+under-development feature upstream; enable it in `~/.codex/config.toml`:
+
+```toml
+[features]
+code_mode = true
+```
+
 ## Build it yourself
 
 ```sh
@@ -47,7 +62,7 @@ Set `GLIBC=2.xx` to target a different minimum glibc. The default is 2.36.
 
 | Change | Why |
 |---|---|
-| `code-mode-host`, `code-mode-runtime` and `v8-poc` removed from the workspace, along with the `rusty_v8` patch | V8 has no riscv64 build. Code mode runs in a separate host process; the package ships a stub host, so Codex falls back to direct tools. |
+| `code-mode-host`, `code-mode-runtime` and `v8-poc` removed from the workspace, along with the `rusty_v8` patch | V8 has no riscv64 build. Code mode runs in a separate host process; `install.sh` supplies the official aarch64 host under qemu, and the package ships a stub as a fallback. |
 | `linux-sandbox`: `TargetArch::riscv64` added to the seccomp filter | Upstream panicked with `unsupported architecture for seccomp filter`. |
 | `app-server-daemon`: riscv64 package target added | Without it the daemon refuses to install from the package. |
 | `cli`: `openssl-sys` built with the `vendored` feature | A cross-compile has no target OpenSSL. |
