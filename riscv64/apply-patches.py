@@ -60,17 +60,7 @@ def daemon_target(s):
     return s.replace(anchor, anchor + '        ("linux", "riscv64") => Ok("riscv64gc-unknown-linux-gnu"),\n', 1)
 
 
-def features(s):
-    # No code-mode host can exist without V8; disable it so sessions use direct tools.
-    if 'cfg!(target_arch = "riscv64")' in s:
-        return s
-    new, n = re.subn(r'(key: "code_mode_host",\n(?:.*\n){0,4}?\s*default_enabled: )true,', r'\1!cfg!(target_arch = "riscv64"),', s, count=1)
-    must(n == 1, "disable code_mode_host on riscv64")
-    return new
-
-
 edit("Cargo.toml", workspace)
 edit("cli/Cargo.toml", cli)
 edit("linux-sandbox/src/seccomp.rs", seccomp)
 edit("app-server-daemon/src/prepare_install.rs", daemon_target)
-edit("features/src/lib.rs", features)

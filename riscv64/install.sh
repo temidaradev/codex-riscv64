@@ -27,12 +27,45 @@ else
   curl -fsSL "$URL.sha256" | awk '{print $1"  '"$T"'/pkg.tar.gz"}' | sha256sum -c - >/dev/null
 fi
 
-tar -xzf "$T/pkg.tar.gz" -C "$T"
+tar --no-same-owner -xzf "$T/pkg.tar.gz" -C "$T"
 PKG=$(find "$T" -mindepth 1 -maxdepth 1 -type d -name 'codex-*' | head -1)
 VERSION=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$PKG/codex-package.json")
 # rg and bwrap must be riscv64 builds, so they come from this system's packages.
 install -m 755 "$(command -v rg)" "$PKG/codex-path/rg"
 install -m 755 "$(command -v bwrap)" "$PKG/codex-resources/bwrap"
+
+# Code mode needs V8, which has no riscv64 build. Use OpenAI's static aarch64
+# code-mode host of the same version, run through qemu-user + binfmt_misc.
+setup_qemu() {
+  [ -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ] && return 0
+  MIRROR=${DEBIAN_MIRROR:-https://deb.debian.org/debian}
+  Q=$(curl -fsSL "$MIRROR/pool/main/q/qemu/" | grep -oE 'qemu-user_10\.0\.[0-9]+\+ds-0\+deb13u[0-9]+_riscv64\.deb' | sort -uV | tail -1)
+  [ -n "$Q" ] || return 1
+  mkdir -p "$T/q" && curl -fsSL "$MIRROR/pool/main/q/qemu/$Q" -o "$T/q/q.deb"
+  (cd "$T/q" && ar x q.deb && tar -xf data.tar.* ./usr/bin/qemu-aarch64)
+  install -m 755 "$T/q/usr/bin/qemu-aarch64" /usr/local/lib/qemu-aarch64
+  printf '%s\n' ':qemu-aarch64:M::\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xb7\x00:\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:/usr/local/lib/qemu-aarch64:POCF' > /etc/binfmt.d/qemu-aarch64.conf
+  systemctl restart systemd-binfmt
+}
+install_code_mode_host() {
+  META=$(curl -fsSL "https://registry.npmjs.org/@openai/codex/$VERSION-linux-arm64") || return 1
+  set -- $(printf '%s' "$META" | python3 -c 'import json,sys; d=json.load(sys.stdin)["dist"]; print(d["tarball"], d["integrity"])')
+  curl -fsSL "$1" -o "$T/arm64.tgz"
+  [ "sha512-$(openssl dgst -sha512 -binary "$T/arm64.tgz" | base64 -w0)" = "$2" ] || { echo "arm64 package integrity mismatch" >&2; return 1; }
+  tar -xzf "$T/arm64.tgz" -C "$T" package/vendor/aarch64-unknown-linux-musl/bin/codex-code-mode-host
+  install -m 755 "$T/package/vendor/aarch64-unknown-linux-musl/bin/codex-code-mode-host" "$PKG/bin/codex-code-mode-host.aarch64"
+  cat > "$PKG/bin/codex-code-mode-host" <<'WRAP'
+#!/bin/sh
+# OpenAI's aarch64 code-mode host (V8) via qemu-user; neoverse-n1 avoids qemu's slow pointer-auth emulation.
+QEMU_CPU=${QEMU_CPU:-neoverse-n1} exec "$(dirname "$0")/codex-code-mode-host.aarch64" "$@"
+WRAP
+  chmod 755 "$PKG/bin/codex-code-mode-host"
+}
+if setup_qemu && install_code_mode_host; then
+  echo "code mode: aarch64 host via qemu-user"
+else
+  echo "code mode: unavailable (kept stub host)" >&2
+fi
 
 DEST=$ROOT/releases/$VERSION
 mkdir -p "$ROOT/releases"
