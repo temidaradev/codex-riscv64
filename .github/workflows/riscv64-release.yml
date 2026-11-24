@@ -52,14 +52,14 @@ jobs:
 
       - name: Checkout riscv64 tooling
         if: steps.v.outputs.skip != 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: self
           sparse-checkout: riscv64
 
       - name: Checkout upstream ${{ steps.v.outputs.version }}
         if: steps.v.outputs.skip != 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: openai/codex
           ref: rust-v${{ steps.v.outputs.version }}
